@@ -1,0 +1,6 @@
+amazon:
+  rate_per_sec: 2
+  burst: 5
+ebay:
+  rate_per_sec: 3
+  burst: 6

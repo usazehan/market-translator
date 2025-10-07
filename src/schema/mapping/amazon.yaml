@@ -1,0 +1,12 @@
+# Minimal illustrative mapping for Amazon
+title: title
+brand:
+  source: brand
+  default: "Generic"
+price: price
+description: description
+bullet_points:
+  source: bullet_points
+  default: ""
+color: color
+size: size

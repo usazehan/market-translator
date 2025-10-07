@@ -1,0 +1,10 @@
+# Minimal illustrative mapping for eBay
+title: title
+price: price
+brand:
+  source: brand
+  default: "Unbranded"
+description: description
+specifics:
+  source: specifics
+  default: ""

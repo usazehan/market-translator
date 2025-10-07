@@ -1,0 +1,4 @@
+id,title,description,brand,price,color,size,bullet_points,specifics
+SKU-001,Premium Cotton T-Shirt,Soft cotton tee for everyday wear,Acme,19.99,Black,M,"['Soft cotton','Slim fit']",material:cotton;gender:unisex
+SKU-002,Wireless Mouse,Ergonomic 2.4G mouse with silent clicks,TechCo,24.50,Gray,,,"dpi:1600;interface:usb"
+SKU-003,Stainless Water Bottle,Insulated 500ml bottle,Hydra,14.00,Blue,500ml,"['Insulated','BPA-free']",capacity:500ml
