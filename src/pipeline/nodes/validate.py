@@ -1,13 +1,11 @@
 from typing import List, Tuple
-from pipeline.state import PipelineState, TranslatedItem
+from pipeline.state import PipelineState, TranslatedItem, Reject
 
-# Base requireds; you can extend per channel.
 REQUIRED = {
     "amazon": ["title", "brand", "price"],
     "ebay": ["title", "price"],
 }
 
-# --------- helpers ---------
 def _missing_fields(payload: dict, fields: List[str]) -> List[str]:
     miss = []
     for f in fields:
@@ -43,27 +41,24 @@ def _validate_bullets(payload: dict, max_count: int = 5) -> Tuple[bool, str]:
         return True, ""
     if isinstance(b, (list, tuple)) and len(b) > max_count:
         return False, f"bullet_points:too_many({len(b)}>{max_count})"
-    # strings are allowed (normalizer may convert later)
     return True, ""
 
-# --------- main node ---------
 def validate_node(state: PipelineState) -> PipelineState:
     channel = (state.channel or "").lower()
     req = REQUIRED.get(channel, ["title"])
 
     valid: List[TranslatedItem] = []
     errors: List[str] = []
+    rejects: List[Reject] = []
 
     for item in state.mapped:
         payload = item.channel_payload
         item_errs: List[str] = []
 
-        # required presence
         missing = _missing_fields(payload, req)
         if missing:
             item_errs.append("missing:" + ",".join(missing))
 
-        # common checks
         ok, msg = _validate_price(payload)
         if not ok:
             item_errs.append(msg)
@@ -72,7 +67,6 @@ def validate_node(state: PipelineState) -> PipelineState:
         if not ok:
             item_errs.append(msg)
 
-        # channel-specific checks
         if channel == "amazon":
             ok, msg = _validate_bullets(payload, max_count=5)
             if not ok:
@@ -80,9 +74,11 @@ def validate_node(state: PipelineState) -> PipelineState:
 
         if item_errs:
             errors.append(f"{item.id}: " + "; ".join(item_errs))
+            rejects.append(Reject(id=item.id, errors=item_errs, channel_payload=payload))
         else:
             valid.append(item)
 
     state.valid = valid
     state.errors.extend(errors)
+    state.rejects = rejects
     return state

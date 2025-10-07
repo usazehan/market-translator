@@ -69,4 +69,8 @@ def run_pipeline(channel: str, catalog_path: str, batch_size: int, dry_run: bool
         },
         "preview_mapped": preview,
         "errors": final_state.errors,
+        "rejects": [
+            (r.model_dump() if hasattr(r, "model_dump") else r)
+            for r in getattr(final_state, "rejects", [])
+        ],
     }

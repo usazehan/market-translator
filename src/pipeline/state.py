@@ -11,6 +11,11 @@ class TranslatedItem(BaseModel):
     id: str
     channel_payload: Dict[str, Any]
 
+class Reject(BaseModel):
+    id: str
+    errors: List[str] = Field(default_factory=list)
+    channel_payload: Dict[str, Any] = Field(default_factory=dict)
+
 class PipelineState(BaseModel):
     channel: str
     catalog_path: str
@@ -22,3 +27,4 @@ class PipelineState(BaseModel):
     batches: List[List[TranslatedItem]] = Field(default_factory=list)
     upserted_ids: List[str] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
+    rejects: List[Reject] = Field(default_factory=list)
