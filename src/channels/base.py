@@ -1,24 +1,17 @@
-from typing import Dict, Any, List, Tuple, Optional
+# src/channels/base.py
+from typing import Dict, Any, List, Tuple
 import os
 
 class ChannelClient:
-    """Base no-op client used when no sandbox is configured."""
     name = "base"
 
     def validate_listing(self, payload: Dict[str, Any]) -> Tuple[bool, List[str]]:
-        # Minimal requireds; your pipeline validator should catch most things already.
-        errors = []
-        if not (payload.get("title") and str(payload.get("title")).strip()):
-            errors.append("title:empty")
-        if not payload.get("price"):
-            errors.append("price:missing")
-        else:
-            try:
-                if float(payload["price"]) <= 0:
-                    errors.append("price:not_positive")
-            except Exception:
-                errors.append("price:not_numeric")
-        return (len(errors) == 0), errors
+        errs = []
+        if not (payload.get("title") or payload.get("attributes")):
+            errs.append("missing:title_or_attributes")
+        if not payload.get("price") and "attributes" not in payload:
+            errs.append("missing:price_or_attributes")
+        return (len(errs) == 0), errs
 
     def upsert_listing(self, payload: Dict[str, Any]) -> bool:
         # Pretend success if minimal fields exist
@@ -26,16 +19,15 @@ class ChannelClient:
         return ok
 
 def get_client(channel: str) -> ChannelClient:
-    """Return a concrete client if sandbox env vars are present, else the stub."""
     ch = (channel or "").lower()
-    try:
-        if ch == "amazon" and os.getenv("AMAZON_BASE_URL"):
-            from .amazon import AmazonSandboxClient
-            return AmazonSandboxClient.from_env()
-        if ch == "ebay" and os.getenv("EBAY_BASE_URL"):
-            from .ebay import EbaySandboxClient
-            return EbaySandboxClient.from_env()
-    except Exception:
-        # If anything goes wrong loading a real client, fall back to stub
-        pass
+    # Prefer Amazon SP-API if LWA creds + endpoint are set
+    if ch == "amazon" and all(
+        os.getenv(k) for k in [
+            "LWA_CLIENT_ID", "LWA_CLIENT_SECRET", "LWA_REFRESH_TOKEN",
+            "SPAPI_HOST", "SELLER_ID", "MARKETPLACE_IDS"
+        ]
+    ):
+        from .amazon import AmazonSPAPIClient
+        return AmazonSPAPIClient.from_env()
+    # (You can add ebay real client detection here later)
     return ChannelClient()

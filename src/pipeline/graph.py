@@ -1,5 +1,6 @@
 import csv
-from typing import Dict, Any, List   # NEW
+import json, os
+from typing import Dict, Any, List
 from langgraph.graph import StateGraph, END
 from .state import PipelineState, Item, TranslatedItem
 from .nodes.map_schema import map_schema_node
@@ -8,9 +9,27 @@ from .nodes.plan_batches import plan_batches_node
 from .nodes.upsert import throttle_and_upsert_node
 from .nodes.reconcile import reconcile_node
 
-def _load_items(csv_path: str) -> List[Item]:
-    out = []
-    with open(csv_path, newline='', encoding='utf-8') as f:
+def _load_items(path: str) -> List[Item]:
+    out: List[Item] = []
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".jsonl":
+        with open(path, "r", encoding="utf-8") as f:
+            for i, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                obj = json.loads(line)
+                # Store full JSON in attributes; id/title/desc are best-effort
+                sku = str(obj.get("sku") or i)
+                title = ""
+                try:
+                    title = obj.get("attributes",{}).get("item_name",[{}])[0].get("value","") or ""
+                except Exception:
+                    pass
+                out.append(Item(id=sku, title=title, description="", attributes=obj))
+        return out
+    
+    with open(path, newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for row in reader:
             out.append(Item(
