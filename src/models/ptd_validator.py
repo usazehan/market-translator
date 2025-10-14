@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Dict, Any, List, Tuple
 import time
 import httpx
-from jsonschema import Draft202012Validator, exceptions as js_exc
+from jsonschema import Draft201909Validator as Validator, exceptions as js_exc
 
 # Simple in-memory cache (productType + marketplaceIds) for ~1 hour
 _CACHE: Dict[str, Dict[str, Any]] = {}
@@ -39,7 +39,7 @@ def fetch_ptd_schema(host: str, marketplace_ids: List[str], access_token: str, p
     }
     params = {
         "marketplaceIds": ",".join(marketplace_ids),
-        "requirements": "ENFORCED",
+        "requirements": "LISTING",
     }
     with httpx.Client(timeout=15.0) as http:
         r = http.get(url, headers=headers, params=params)
@@ -95,7 +95,7 @@ def validate_attributes_with_ptd(
 
     try:
         # PTD schema describes the 'attributes' object directly.
-        validator = Draft202012Validator(schema)
+        validator = Validator(schema)
         errors = sorted(validator.iter_errors(attributes), key=lambda e: e.path)
         if not errors:
             return True, []
