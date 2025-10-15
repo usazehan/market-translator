@@ -18,16 +18,25 @@ class ChannelClient:
         ok, _ = self.validate_listing(payload)
         return ok
 
+def _has_all(names: list[str]) -> bool:
+    return all(os.getenv(n) for n in names)
+
 def get_client(channel: str) -> ChannelClient:
     ch = (channel or "").lower()
     # Prefer Amazon SP-API if LWA creds + endpoint are set
-    if ch == "amazon" and all(
-        os.getenv(k) for k in [
-            "LWA_CLIENT_ID", "LWA_CLIENT_SECRET", "LWA_REFRESH_TOKEN",
-            "SPAPI_HOST", "SELLER_ID", "MARKETPLACE_IDS"
-        ]
-    ):
+    if ch == "amazon" and _has_all([
+        "LWA_CLIENT_ID", "LWA_CLIENT_SECRET", "LWA_REFRESH_TOKEN",
+        "SPAPI_HOST", "SELLER_ID", "MARKETPLACE_IDS"
+    ]):
         from .amazon import AmazonSPAPIClient
         return AmazonSPAPIClient.from_env()
-    # (You can add ebay real client detection here later)
+    
+    # eBay Sell APIs (sandbox or prod)
+    if ch == "ebay" and _has_all([
+        "EBAY_BASE_URL", "EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET",
+        "EBAY_REFRESH_TOKEN", "EBAY_MARKETPLACE_ID"
+    ]):
+        from .ebay import EbayClient
+        return EbayClient.from_env()
+    
     return ChannelClient()
