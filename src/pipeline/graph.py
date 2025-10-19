@@ -8,6 +8,7 @@ from .nodes.validate import validate_node
 from .nodes.plan_batches import plan_batches_node
 from .nodes.upsert import throttle_and_upsert_node
 from .nodes.reconcile import reconcile_node
+from storage.runs import save_run, new_run_id
 
 def _load_items(path: str) -> List[Item]:
     out: List[Item] = []
@@ -57,6 +58,18 @@ def build_graph():
 
     return g.compile()
 
+def _group_errors_by_id(errors: List[str]) -> Dict[str, List[str]]:
+    grouped: Dict[str, List[str]] = {}
+    for e in errors or []:
+        if ":" in e:
+            _id, msg = e.split(":", 1)
+            _id = _id.strip()
+            msg = msg.strip()
+        else:
+            _id, msg = "_unknown_", e.strip()
+        grouped.setdefault(_id, []).append(msg)
+    return grouped
+
 def run_pipeline(channel: str, catalog_path: str, batch_size: int, dry_run: bool, extra: Dict[str, Any]):
     items = _load_items(catalog_path)
     state = PipelineState(
@@ -65,18 +78,28 @@ def run_pipeline(channel: str, catalog_path: str, batch_size: int, dry_run: bool
         batch_size=batch_size,
         dry_run=dry_run,
         items=items,
+        extra=extra or {},
     )
     app = build_graph()
-    result = app.invoke(state)
+    final_state = app.invoke(state)
 
-    # NEW: LangGraph may return a dict; coerce to PipelineState for attribute access
-    final_state = PipelineState(**result) if isinstance(result, dict) else result
+    # Build a small preview
+    preview = [m.model_dump() for m in final_state.mapped[:min(5, len(final_state.mapped))]]
 
-    preview = [
-        (m.model_dump() if hasattr(m, "model_dump") else m)
-        for m in final_state.mapped[: min(5, len(final_state.mapped))]
+    # Build rejects [{id, errors, channel_payload}]
+    by_id = _group_errors_by_id(final_state.errors)
+    mapped_by_id = {m.id: m.channel_payload for m in final_state.mapped}
+    rejects = [
+        {
+            "id": _id,
+            "errors": msgs,
+            "channel_payload": mapped_by_id.get(_id, {}),
+        }
+        for _id, msgs in by_id.items()
     ]
-    return {
+
+    result = {
+        "run_id": new_run_id(),
         "channel": channel,
         "counts": {
             "input_items": len(items),
@@ -87,9 +110,10 @@ def run_pipeline(channel: str, catalog_path: str, batch_size: int, dry_run: bool
             "errors": len(final_state.errors),
         },
         "preview_mapped": preview,
-        "errors": final_state.errors,
-        "rejects": [
-            (r.model_dump() if hasattr(r, "model_dump") else r)
-            for r in getattr(final_state, "rejects", [])
-        ],
+        "rejects": rejects,
+        "errors": final_state.errors,  # raw strings (kept for debugging)
     }
+
+    # Persist a snapshot for /review (and for reproducibility)
+    save_run(result["run_id"], result)
+    return result

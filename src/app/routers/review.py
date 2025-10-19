@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 
 from pipeline.graph import run_pipeline
-# Optional future: from storage.runs import load_run  # if you add snapshots
+from storage.runs import load_run
 
 router = APIRouter(tags=["review"])
 
@@ -70,37 +70,32 @@ def review(
     code_pref: Optional[str] = Query(None, description="Error code prefix (e.g. 'schema:' or 'missing:')"),
     sort_by: Optional[str] = Query(None, pattern="^(id|errors)$", description="Sort by id or first error"),
     sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
-    # Optional future: run_id: Optional[str] = Query(None, description="Use a saved run snapshot instead of re-running"),
+    run_id: Optional[str] = Query(None, description="Use a saved run snapshot instead of re-running"),
 ):
-    """
-    Returns only rejects for a run of the pipeline (dry-run).
-    Note: currently re-executes the pipeline; consider persisting runs and adding run_id later.
-    """
-    # If you add snapshots later:
-    # if run_id:
-    #     snap = load_run(run_id)
-    #     if not snap:
-    #         raise HTTPException(status_code=404, detail="Run not found")
-    #     rejects = snap.get("rejects", [])
-    #     return _render_rejects(channel, rejects, ...)
+    # Prefer snapshot if run_id is provided
+    data = None
+    if run_id:
+        data = load_run(run_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="run_id not found")
+    else:
+        # Stateless mode: re-run the pipeline as dry-run
+        try:
+            data = run_pipeline(
+                channel=channel,
+                catalog_path=req.catalog_path,
+                batch_size=req.batch_size,
+                dry_run=True,
+                extra=req.extra or {},
+            )
+        except FileNotFoundError:
+            raise HTTPException(status_code=400, detail="catalog_path not found")
+        except Exception as ex:
+            raise HTTPException(status_code=500, detail=f"pipeline_error:{type(ex).__name__}")
 
-    try:
-        result = run_pipeline(
-            channel=channel,
-            catalog_path=req.catalog_path,
-            batch_size=req.batch_size,
-            dry_run=True,
-            extra=req.extra or {},
-        )
-    except FileNotFoundError:
-        raise HTTPException(status_code=400, detail="catalog_path not found")
-    except Exception as ex:
-        # Convert unexpected pipeline failures into a clean HTTP 500
-        raise HTTPException(status_code=500, detail=f"pipeline_error:{type(ex).__name__}")
+    rejects: List[Dict[str, Any]] = data.get("rejects", []) or []
 
-    rejects: List[Dict[str, Any]] = result.get("rejects", []) or []
-
-    # filter
+    # filtering
     filtered = [
         r for r in rejects
         if _match_contains(r, contains)
@@ -108,34 +103,32 @@ def review(
         and _match_code_prefix(r, code_pref)
     ]
 
-    # sort
+    # sorting
     if sort_by:
-        reverse = (sort_dir == "desc")
+        reverse = sort_dir == "desc"
         if sort_by == "id":
             filtered.sort(key=lambda r: (r.get("id") or ""), reverse=reverse)
-        else:  # errors
+        else:
             filtered.sort(key=lambda r: " ".join(r.get("errors", [])), reverse=reverse)
 
     total = len(filtered)
-    start = offset
-    end = min(offset + limit, total)
-    page_dicts = filtered[start:end]
+    page = filtered[offset: offset + limit]
 
-    # shape into models
-    page = [
+    items = [
         RejectItem(
-            id=str(d.get("id") or ""),
-            errors=[str(e) for e in (d.get("errors") or [])],
-            channel_payload=d.get("channel_payload") or None,
+            id=str(p.get("id") or ""),
+            errors=[str(e) for e in (p.get("errors") or [])],
+            channel_payload=p.get("channel_payload") or None,
         )
-        for d in page_dicts
+        for p in page
     ]
 
     return ReviewResponse(
-        channel=channel,
+        run_id=data.get("run_id", "unknown"),
+        channel=data.get("channel", channel),
         total_rejects=len(rejects),
         total_filtered=total,
         limit=limit,
         offset=offset,
-        items=page,
+        items=items,
     )
