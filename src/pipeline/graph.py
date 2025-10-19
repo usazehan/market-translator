@@ -13,32 +13,47 @@ from storage.runs import save_run, new_run_id
 def _load_items(path: str) -> List[Item]:
     out: List[Item] = []
     ext = os.path.splitext(path)[1].lower()
+
     if ext == ".jsonl":
         with open(path, "r", encoding="utf-8") as f:
             for i, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
                     continue
-                obj = json.loads(line)
-                # Store full JSON in attributes; id/title/desc are best-effort
-                sku = str(obj.get("sku") or i)
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                sku = str(obj.get("sku") or obj.get("id") or i)
                 title = ""
                 try:
-                    title = obj.get("attributes",{}).get("item_name",[{}])[0].get("value","") or ""
+                    title = (
+                        obj.get("title")
+                        or obj.get("attributes", {}).get("item_name", [{}])[0].get("value", "")
+                        or ""
+                    )
                 except Exception:
                     pass
-                out.append(Item(id=sku, title=title, description="", attributes=obj))
+                # Keep attributes relatively scoped: prefer the 'attributes' subobject if present
+                attrs = obj.get("attributes", obj)
+                out.append(Item(id=sku, title=title, description="", attributes=attrs))
         return out
     
-    with open(path, newline='', encoding='utf-8') as f:
+    with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        for row in reader:
-            out.append(Item(
-                id=row.get("id") or row.get("sku") or row.get("ID") or str(len(out)+1),
-                title=row.get("title", ""),
-                description=row.get("description", ""),
-                attributes={k: v for k, v in row.items() if k not in {"id","sku","ID","title","description"}}
-            ))
+        for idx, row in enumerate(reader, start=1):
+            out.append(
+                Item(
+                    id=row.get("id") or row.get("sku") or row.get("ID") or str(idx),
+                    title=(row.get("title") or "").strip(),
+                    description=(row.get("description") or "").strip(),
+                    attributes={
+                        k: v
+                        for k, v in row.items()
+                        if k not in {"id", "sku", "ID", "title", "description"}
+                    },
+                )
+            )
     return out
 
 def build_graph():
@@ -97,6 +112,9 @@ def run_pipeline(channel: str, catalog_path: str, batch_size: int, dry_run: bool
         }
         for _id, msgs in by_id.items()
     ]
+
+    # Sort for deterministic paging in /review
+    rejects.sort(key=lambda r: r.get("id") or "")
 
     result = {
         "run_id": new_run_id(),
