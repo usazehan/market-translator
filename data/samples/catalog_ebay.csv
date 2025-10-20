@@ -1,0 +1,4 @@
+id,title,description,brand,price,color,size,quantity,categoryId
+EB-SKU-001,Premium Cotton T-Shirt,Soft cotton tee for everyday wear,Acme,19.99,Black,M,5,9344
+EB-SKU-002,Wireless Mouse,Ergonomic 2.4G mouse with silent clicks,TechCo,24.50,Gray,,10,31388
+EB-SKU-003,Stainless Water Bottle,Insulated 500ml bottle,Hydra,14.00,Blue,500ml,20,179961
