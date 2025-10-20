@@ -28,3 +28,4 @@ class PipelineState(BaseModel):
     upserted_ids: List[str] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
     rejects: List[Reject] = Field(default_factory=list)
+    extra: Dict[str, Any] = Field(default_factory=dict)

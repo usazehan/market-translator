@@ -232,22 +232,35 @@ class EbayClient:
         errs: List[str] = []
         norm = _normalize(payload)
 
-        if not norm["title"]:
+        # basic requireds
+        if not norm.get("title"):
             errs.append("missing:title")
-        if not norm["price"]:
+        if not norm.get("price"):
             errs.append("missing:price")
-        # Try to infer Brand from aspects
-        has_brand = any(k.lower() == "brand" and v for k, v in (norm["aspects"] or {}).items())
+
+        # Brand present? (case-insensitive key + non-empty value)
+        aspects = norm.get("aspects") or {}
+        has_brand = any(
+            k.casefold() == "brand"
+            and (
+                (isinstance(v, list) and any(str(x).strip() for x in v)) or
+                (isinstance(v, str) and v.strip())
+            )
+            for k, v in aspects.items()
+        )
         if not has_brand:
             errs.append("missing:brand")
 
-        cat = norm.get("categoryId") or os.getenv("EBAY_DEFAULT_CATEGORY_ID") or ""
+        # Category-required aspects: compare case-insensitively, but report with schema names
+        cat = (norm.get("categoryId") or os.getenv("EBAY_DEFAULT_CATEGORY_ID") or "").strip()
         if cat:
-            req = _required_aspects(str(cat))
-            have_keys = {k.lower() for k in (norm["aspects"] or {}).keys()}
-            for name in req:
-                if name.lower() not in have_keys:
-                    errs.append(f"aspects:missing:{name}")
+            required_list = list(_required_aspects(str(cat)) or [])
+            # cf map lets us test insensitively but return original names
+            required_cf = {r.casefold(): r for r in required_list}
+            have_cf = {k.casefold() for k in aspects.keys()}
+            missing = [orig for cf, orig in required_cf.items() if cf not in have_cf]
+            if missing:
+                errs.append(f"aspects:missing:{','.join(missing)}")
 
         return (len(errs) == 0), errs
 
