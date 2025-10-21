@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 
 from channels.ebay import EbayClient, _ensure_policies, _required_aspects
 
-router = APIRouter(prefix="/ebay", tags=["ebay"])
+router = APIRouter(prefix="/ebay")
 client = EbayClient.from_env()
 
 class EbayPayload(BaseModel):
