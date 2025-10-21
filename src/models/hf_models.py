@@ -3,7 +3,8 @@
 
 from typing import Dict, Any
 from pipeline.state import Item
-import ast, re
+import ast
+import re
 
 def normalize_title_desc(item: Item, payload: Dict[str, Any]) -> Dict[str, Any]:
     # Work on a copy to avoid in-place surprises

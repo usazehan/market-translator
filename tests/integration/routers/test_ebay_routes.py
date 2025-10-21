@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import json as pyjson
 import types
 from typing import Any, Dict, List, Tuple
 
@@ -57,16 +57,16 @@ class _HttpxClientStub:
         self.calls.append(("GET", key[1], ""))  # body empty for GET
         return self._mapping.get(key, _Resp(200, {}))
 
-    def post(self, url, headers=None, content=None, json=None):
-        body = content.decode() if isinstance(content, (bytes, bytearray)) else (json if json is not None else "")
+    def post(self, url, headers=None, content=None, json_body=None):
+        body = content.decode() if isinstance(content, (bytes, bytearray)) else (json_body if json_body is not None else "")
         key = self._make_key("POST", url, None)
-        self.calls.append(("POST", key[1], body if isinstance(body, str) else json.dumps(body)))
+        self.calls.append(("POST", key[1], body if isinstance(body, str) else pyjson.dumps(body)))
         return self._mapping.get(key, _Resp(200, {}))
 
-    def put(self, url, headers=None, content=None, json=None):
-        body = content.decode() if isinstance(content, (bytes, bytearray)) else (json if json is not None else "")
+    def put(self, url, headers=None, content=None, json_body=None):
+        body = content.decode() if isinstance(content, (bytes, bytearray)) else (json_body if json_body is not None else "")
         key = self._make_key("PUT", url, None)
-        self.calls.append(("PUT", key[1], body if isinstance(body, str) else json.dumps(body)))
+        self.calls.append(("PUT", key[1], body if isinstance(body, str) else pyjson.dumps(body)))
         return self._mapping.get(key, _Resp(200, {}))
 
 

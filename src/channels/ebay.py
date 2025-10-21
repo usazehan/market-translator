@@ -123,19 +123,22 @@ def _ensure_policies(marketplace_id: str) -> Dict[str, str]:
                       headers=_h_user(), params={"marketplace_id": marketplace_id})
             if r.status_code == 200:
                 arr = (r.json() or {}).get("paymentPolicies") or []
-                if arr: ids["paymentPolicyId"] = arr[0].get("paymentPolicyId") or arr[0].get("id", "")
+                if arr: 
+                    ids["paymentPolicyId"] = arr[0].get("paymentPolicyId") or arr[0].get("id", "")
         if not ids["fulfillmentPolicyId"]:
             r = s.get(f"{EBAY_BASE_URL}/sell/account/v1/fulfillment_policy",
                       headers=_h_user(), params={"marketplace_id": marketplace_id})
             if r.status_code == 200:
                 arr = (r.json() or {}).get("fulfillmentPolicies") or []
-                if arr: ids["fulfillmentPolicyId"] = arr[0].get("fulfillmentPolicyId") or arr[0].get("id", "")
+                if arr: 
+                    ids["fulfillmentPolicyId"] = arr[0].get("fulfillmentPolicyId") or arr[0].get("id", "")
         if not ids["returnPolicyId"]:
             r = s.get(f"{EBAY_BASE_URL}/sell/account/v1/return_policy",
                       headers=_h_user(), params={"marketplace_id": marketplace_id})
             if r.status_code == 200:
                 arr = (r.json() or {}).get("returnPolicies") or []
-                if arr: ids["returnPolicyId"] = arr[0].get("returnPolicyId") or arr[0].get("id", "")
+                if arr: 
+                    ids["returnPolicyId"] = arr[0].get("returnPolicyId") or arr[0].get("id", "")
 
     _policy_cache[marketplace_id] = ids
     return ids

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from channels.ebay import EbayClient, _ensure_policies, _required_aspects
 

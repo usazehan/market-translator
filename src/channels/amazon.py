@@ -1,7 +1,9 @@
 # src/channels/amazon.py
 from __future__ import annotations
 from typing import Dict, Any, List, Tuple, Optional
-import os, time, httpx
+import os
+import time
+import httpx
 from models.ptd_validator import validate_attributes_with_ptd
 
 class _LWA:
