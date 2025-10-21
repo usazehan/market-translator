@@ -111,7 +111,7 @@ python -m uvicorn src.app.main:app --reload
 |---|---|---|
 | GET | `/health` | Basic health check (current router exposes `/health`). |
 | POST | `/translate/{channel}?dry_run=true\|false` | Run the pipeline for `amazon` or `ebay`. With `dry_run=true`, returns counts + preview. |
-| POST | `/review` *(planned)* | Return rejects + error codes to drive a fix-up UI. |
+| POST   | `/review/{channel}`                | Return rejects + error codes to drive a fix-up UI (filter/sort/paging supported). |
 | POST | `/ebay/validate` | Validate a single eBay payload (title/brand/price + optional category aspects). |
 | POST | `/ebay/upsert/{sku}?mode=DRAFT\|LIVE` | Create/replace Inventory Item → Offer; publish when `mode=LIVE`. |
 
@@ -213,8 +213,8 @@ GET /sellers/v1/marketplaceParticipations on $SPAPI_HOST
 
 #### Swagger helpers:
 
-- POST /ebay/validate
-- POST /ebay/upsert/{sku}?mode=DRAFT|LIVE
+- ``POST /ebay/validate``
+- ``POST /ebay/upsert/{sku}?mode=DRAFT|LIVE``
 
 ---
 
@@ -251,6 +251,18 @@ src/
       loader.py
   dspylocal/
     normalizer.py
+```
+
+---
+
+## Testing
+
+```bash
+# run all tests
+pytest -q
+
+# or just eBay integration route tests
+pytest -q tests/integration/test_ebay_routes.py
 ```
 
 ---
