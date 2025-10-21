@@ -1,9 +1,8 @@
 # tests/test_ebay.py
 from __future__ import annotations
 
-import json
 import types
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import pytest
 
