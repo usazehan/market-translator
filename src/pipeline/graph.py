@@ -99,11 +99,11 @@ def run_pipeline(channel: str, catalog_path: str, batch_size: int, dry_run: bool
     final_state = app.invoke(state)
 
     # Build a small preview
-    preview = [m.model_dump() for m in final_state.mapped[:min(5, len(final_state.mapped))]]
+    preview = [m.model_dump() for m in final_state["mapped"][:5]]
 
     # Build rejects [{id, errors, channel_payload}]
-    by_id = _group_errors_by_id(final_state.errors)
-    mapped_by_id = {m.id: m.channel_payload for m in final_state.mapped}
+    by_id = _group_errors_by_id(final_state["errors"])
+    mapped_by_id = {m.id: m.channel_payload for m in final_state["mapped"]}
     rejects = [
         {
             "id": _id,
@@ -121,15 +121,15 @@ def run_pipeline(channel: str, catalog_path: str, batch_size: int, dry_run: bool
         "channel": channel,
         "counts": {
             "input_items": len(items),
-            "mapped": len(final_state.mapped),
-            "valid": len(final_state.valid),
-            "batches": len(final_state.batches),
-            "upserted": len(final_state.upserted_ids),
-            "errors": len(final_state.errors),
+            "mapped": len(final_state["mapped"]),
+            "valid": len(final_state["valid"]),
+            "batches": len(final_state["batches"]),
+            "upserted": len(final_state["upserted_ids"]),
+            "errors": len(final_state["errors"]),
         },
         "preview_mapped": preview,
         "rejects": rejects,
-        "errors": final_state.errors,  # raw strings (kept for debugging)
+        "errors": final_state["errors"],  # raw strings (kept for debugging)
     }
 
     # Persist a snapshot for /review (and for reproducibility)

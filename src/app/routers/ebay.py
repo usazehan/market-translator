@@ -1,33 +1,64 @@
+# src/app/routers/ebay.py
 from __future__ import annotations
-from fastapi import APIRouter, Body, Query, HTTPException
-from channels.base import get_client
+
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, ConfigDict
+from typing import Any, Dict, List, Optional
+
+from channels.ebay import EbayClient, _ensure_policies, _required_aspects
 
 router = APIRouter(prefix="/ebay", tags=["ebay"])
+client = EbayClient.from_env()
 
-def _client_or_501():
-    c = get_client("ebay")
-    # If env isn’t set, base client is returned; don’t pretend to upsert.
-    if getattr(c, "name", "base") == "base":
-        raise HTTPException(
-            status_code=501,
-            detail="eBay client not configured. Set EBAY_* env vars (BASE_URL, CLIENT_ID/SECRET, REFRESH_TOKEN, MARKETPLACE_ID).",
-        )
-    return c
+class EbayPayload(BaseModel):
+    sku: Optional[str] = None
+    id: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    brand: Optional[str] = None
+    price: Optional[str] = None
+    currency: Optional[str] = "USD"
+    quantity: Optional[int] = 1
+    categoryId: Optional[str] = None
+    aspects: Optional[Dict[str, List[str]]] = None
+    # allow extra keys for forward-compat
+    model_config = ConfigDict(extra="allow")
 
 @router.post("/validate")
-def validate(payload: dict = Body(...)):
-    c = _client_or_501()
-    ok, errs = c.validate_listing(payload)
+def validate(payload: EbayPayload):
+    ok, errs = client.validate_listing(payload.model_dump(exclude_none=True))
     return {"ok": ok, "errors": errs}
 
 @router.post("/upsert/{sku}")
 def upsert(
     sku: str,
-    payload: dict = Body(...),
-    mode: str = Query("DRAFT", pattern="^(LIVE|DRAFT)$"),
+    payload: EbayPayload,
+    mode: str = Query("DRAFT", pattern="^(DRAFT|LIVE)$"),
 ):
-    c = _client_or_501()
-    # convenience: let path param drive SKU; pass mode through to client
-    merged = {**payload, "sku": sku, "mode": mode.upper()}
-    ok = c.upsert_listing(merged)
-    return {"ok": ok, "mode": mode.upper(), "sku": sku}
+    data = payload.model_dump(exclude_none=True)
+    data.setdefault("sku", sku)
+    ok, errs = client.upsert_listing(data, mode=mode.upper())
+    if not ok and not errs:
+        raise HTTPException(status_code=502, detail="ebay_upsert_failed")
+    return {"ok": ok, "errors": errs, "mode": mode.upper(), "sku": sku}
+
+@router.get("/policies")
+def get_policies():
+    # warms cache; returns ids in use
+    from channels.ebay import EBAY_MARKETPLACE_ID
+    ids = _ensure_policies(EBAY_MARKETPLACE_ID)
+    return {"marketplaceId": EBAY_MARKETPLACE_ID, "policies": ids}
+
+@router.get("/aspects/{category_id}")
+def get_required_aspects(category_id: str):
+    req = _required_aspects(category_id)
+    return {"categoryId": category_id, "required_aspects": req}
+
+@router.post("/cache/clear")
+def clear_cache():
+    # local-dev helper to reset caches if you change env/account
+    from channels.ebay import _token_cache, _policy_cache, _aspects_cache
+    _token_cache.clear()
+    _policy_cache.clear()
+    _aspects_cache.clear()
+    return {"cleared": True}
