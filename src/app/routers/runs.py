@@ -1,7 +1,6 @@
 # src/app/routers/runs.py
 from __future__ import annotations
 
-from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from storage.runs import list_runs, load_run

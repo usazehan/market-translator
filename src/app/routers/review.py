@@ -4,11 +4,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Query, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
+from collections import Counter
 
 from pipeline.graph import run_pipeline
 from storage.runs import load_run
 
-router = APIRouter(tags=["review"])
+router = APIRouter(prefix="/review")
 
 # ---------- Models ----------
 
@@ -57,9 +58,48 @@ def _match_code_prefix(rec: Dict[str, Any], code_pref: Optional[str]) -> bool:
     errs = rec.get("errors", []) or []
     return any(e.startswith(code_pref) for e in errs)
 
+def _collect_error_strings(run_snapshot: Dict[str, Any]) -> List[str]:
+    """
+    Prefer errors from run['rejects'][i]['errors'] (already grouped by id).
+    Fall back to run['errors'] (raw 'id: message' strings) if needed.
+    """
+    errs: List[str] = []
+    rejects = run_snapshot.get("rejects") or []
+    if rejects:
+        for r in rejects:
+            for e in (r.get("errors") or []):
+                if e:
+                    errs.append(str(e))
+        return errs
+
+    # Fallback: parse raw "id: message"
+    for raw in (run_snapshot.get("errors") or []):
+        try:
+            _, msg = str(raw).split(":", 1)
+            errs.append(msg.strip())
+        except ValueError:
+            errs.append(str(raw).strip())
+    return errs
+
+def _families(code: str) -> List[str]:
+    """
+    Break a code like 'schema:required:attributes/brand' into families:
+      - 'schema'
+      - 'schema:required'
+    For 'aspects:missing:Color' -> 'aspects', 'aspects:missing'
+    For 'missing:brand' -> 'missing'
+    """
+    parts = str(code).split(":")
+    fams: List[str] = []
+    if parts:
+        fams.append(parts[0])
+    if len(parts) >= 2:
+        fams.append(":".join(parts[:2]))
+    return fams
+
 # ---------- Route ----------
 
-@router.post("/review/{channel}", response_model=ReviewResponse)
+@router.post("/{channel}", response_model=ReviewResponse)
 def review(
     channel: str,
     req: ReviewRequest,
@@ -132,3 +172,47 @@ def review(
         offset=offset,
         items=items,
     )
+    
+@router.get("/summary")
+def review_summary(
+    run_id: Optional[str] = Query(None, description="Run id to summarize; defaults to latest saved run"),
+    top: int = Query(50, ge=1, le=500, description="Max rows for each histogram"),
+):
+    snap = load_run(run_id)
+    if not snap:
+        raise HTTPException(status_code=404, detail="No saved runs found" if run_id is None else "Run not found")
+
+    codes = _collect_error_strings(snap)
+
+    # Exact code histogram
+    exact_ctr = Counter(codes)
+
+    # Family histograms
+    fam1_ctr: Counter[str] = Counter()
+    fam2_ctr: Counter[str] = Counter()
+    for c in codes:
+        fams = _families(c)
+        if len(fams) >= 1:
+            fam1_ctr[fams[0]] += 1
+        if len(fams) >= 2:
+            fam2_ctr[fams[1]] += 1
+
+    def _top(counter: Counter[str]) -> List[Dict[str, Any]]:
+        return [{"code": k, "count": v} for k, v in counter.most_common(top)]
+
+    return {
+        "run_id": snap.get("run_id"),
+        "channel": snap.get("channel"),
+        "catalog_path": snap.get("catalog_path"),
+        "catalog_sha256": (snap.get("catalog_fingerprint") or {}).get("sha256"),
+        "counts": {
+            "total_rejects": len(snap.get("rejects") or []),
+            "total_errors": sum(exact_ctr.values()),
+            "unique_error_codes": len(exact_ctr),
+        },
+        "histograms": {
+            "exact": _top(exact_ctr),
+            "families_level1": _top(fam1_ctr),  # e.g., 'missing', 'schema', 'aspects'
+            "families_level2": _top(fam2_ctr),  # e.g., 'schema:required', 'aspects:missing'
+        },
+    }
