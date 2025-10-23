@@ -9,7 +9,7 @@ from .nodes.validate import validate_node
 from .nodes.plan_batches import plan_batches_node
 from .nodes.upsert import throttle_and_upsert_node
 from .nodes.reconcile import reconcile_node
-from storage.runs import save_run, new_run_id
+from storage.runs import save_run, new_run_id, catalog_fingerprint
 
 def _load_items(path: str) -> List[Item]:
     out: List[Item] = []
@@ -120,6 +120,8 @@ def run_pipeline(channel: str, catalog_path: str, batch_size: int, dry_run: bool
     result = {
         "run_id": new_run_id(),
         "channel": channel,
+        "catalog_path": catalog_path,                       # <-- ensure present
+        "catalog_fingerprint": catalog_fingerprint(catalog_path),
         "counts": {
             "input_items": len(items),
             "mapped": len(final_state["mapped"]),
