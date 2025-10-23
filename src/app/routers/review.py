@@ -26,6 +26,7 @@ class ReviewRequest(BaseModel):
 
 class ReviewResponse(BaseModel):
     channel: str
+    run_id: str 
     total_rejects: int
     total_filtered: int
     limit: int
@@ -62,48 +63,45 @@ def _flatten_error_codes(rejects: List[Dict[str, Any]], raw_errors: List[str]) -
     """
     Build a flat list of error codes from snapshot:
     - Prefer structured rejects[i]["errors"] (list of strings)
-    - Fall back to parsing raw "A: missing:title" strings if rejects is empty
     """
     out: List[str] = []
     
     # Process structured rejects first
     for r in rejects or []:
         for e in r.get("errors") or []:
-            if not e:
-                continue
-            # If reject errors are "code" only, use as-is; if "id: code", strip id
-            if ":" in e and not e.startswith(("missing:", "schema:", "aspects:", "required:")):
-                # likely "ID: message" → keep message part
-                _, tail = e.split(":", 1)
-                out.append(tail.strip())
-            else:
+            if e and isinstance(e, str):
                 out.append(e.strip())
     
     # Only use raw_errors as fallback if we got nothing from rejects
     if not out:
         for s in raw_errors or []:
+            if not s:
+                continue
+            # Parse "ID: error_code" format
             if ":" in s:
-                _, tail = s.split(":", 1)
-                out.append(tail.strip())
+                parts = s.split(":", 1)
+                # If first part looks like an ID (no colons), strip it
+                if ":" not in parts[0]:
+                    out.append(parts[1].strip())
+                else:
+                    out.append(s.strip())
             else:
                 out.append(s.strip())
     
-    # normalize empties
     return [c for c in out if c]
-
-def _family(code: str) -> str:
-    # family is the prefix before the first colon, e.g. "missing", "schema", "aspects"
-    i = code.find(":")
-    return code[:i+1] if i != -1 else code
 
 def _family_level1(code: str) -> str:
     """Extract first prefix: 'missing:brand' -> 'missing'"""
+    if not code:
+        return ""
     i = code.find(":")
     return code[:i] if i != -1 else code
 
 def _family_level2(code: str) -> str:
-    """Extract first two prefixes: 'schema:required:attributes/brand' -> 'schema:required'"""
-    parts = code.split(":")
+    """Extract first two prefixes: 'schema:required:brand' -> 'schema:required'"""
+    if not code:
+        return ""
+    parts = code.split(":", 2)  # Only split up to 2 levels
     if len(parts) >= 2:
         return f"{parts[0]}:{parts[1]}"
     return code
@@ -194,32 +192,39 @@ def review_summary(
         description="Return only the top-N error families by count (1..100). Omit for all."
     ),
 ):
+    """
+    Get error histogram summaries for a run with hierarchical family groupings.
+    """
     snap = load_run(run_id)
     if not snap:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Run not found: {run_id}" if run_id else "No runs available"
+        )
 
     rejects: List[Dict[str, Any]] = snap.get("rejects", [])
     raw_errors: List[str] = snap.get("errors", [])
     
-    # 1) build exact codes and family buckets
+    # build exact codes and family buckets
     exact_codes = _flatten_error_codes(rejects, raw_errors)
-    exact_hist = Counter(exact_codes)
-    
-    # Build hierarchical family histograms
-    fam1_hist = Counter(_family_level1(c) for c in exact_codes)
-    fam2_hist = Counter(_family_level2(c) for c in exact_codes)
+    exact_hist = Counter()
+    fam1_hist = Counter()
+    fam2_hist = Counter()
 
+    for code in exact_codes:
+        exact_hist[code] += 1
+        fam1_hist[_family_level1(code)] += 1
+        fam2_hist[_family_level2(code)] += 1
     
     # 2) sort and limit
     fam1_items = sorted(fam1_hist.items(), key=lambda kv: (-kv[1], kv[0]))
     fam2_items = sorted(fam2_hist.items(), key=lambda kv: (-kv[1], kv[0]))
+    exact_items = sorted(exact_hist.items(), key=lambda kv: (-kv[1], kv[0]))
     
     if top is not None:
         fam1_items = fam1_items[:top]
         fam2_items = fam2_items[:top]
     
-    exact_items = sorted(exact_hist.items(), key=lambda kv: (-kv[1], kv[0]))
-
     return {
         "run_id": snap.get("run_id"),
         "channel": snap.get("channel"),
@@ -228,7 +233,8 @@ def review_summary(
         "counts": {
             "total_rejects": len(rejects),
             "total_errors": len(exact_codes),
-            "unique_error_codes": len(fam1_hist),  # families
+            "unique_error_codes": len(fam1_hist),
+            "returned_histogram_bins": len(fam1_items),
         },
         "histograms": {
             "families_level1": [{"code": code, "count": count} for code, count in fam1_items],
