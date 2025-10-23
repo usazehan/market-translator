@@ -8,7 +8,7 @@ from storage.runs import list_runs, load_run
 router = APIRouter(prefix="/runs")
 
 @router.get("")
-def list_runs(
+def list_runs_endpoint(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     sort: str = Query("desc", pattern="^(asc|desc)$"),

@@ -58,44 +58,55 @@ def _match_code_prefix(rec: Dict[str, Any], code_pref: Optional[str]) -> bool:
     errs = rec.get("errors", []) or []
     return any(e.startswith(code_pref) for e in errs)
 
-def _collect_error_strings(run_snapshot: Dict[str, Any]) -> List[str]:
+def _flatten_error_codes(rejects: List[Dict[str, Any]], raw_errors: List[str]) -> List[str]:
     """
-    Prefer errors from run['rejects'][i]['errors'] (already grouped by id).
-    Fall back to run['errors'] (raw 'id: message' strings) if needed.
+    Build a flat list of error codes from snapshot:
+    - Prefer structured rejects[i]["errors"] (list of strings)
+    - Fall back to parsing raw "A: missing:title" strings if rejects is empty
     """
-    errs: List[str] = []
-    rejects = run_snapshot.get("rejects") or []
-    if rejects:
-        for r in rejects:
-            for e in (r.get("errors") or []):
-                if e:
-                    errs.append(str(e))
-        return errs
+    out: List[str] = []
+    
+    # Process structured rejects first
+    for r in rejects or []:
+        for e in r.get("errors") or []:
+            if not e:
+                continue
+            # If reject errors are "code" only, use as-is; if "id: code", strip id
+            if ":" in e and not e.startswith(("missing:", "schema:", "aspects:", "required:")):
+                # likely "ID: message" → keep message part
+                _, tail = e.split(":", 1)
+                out.append(tail.strip())
+            else:
+                out.append(e.strip())
+    
+    # Only use raw_errors as fallback if we got nothing from rejects
+    if not out:
+        for s in raw_errors or []:
+            if ":" in s:
+                _, tail = s.split(":", 1)
+                out.append(tail.strip())
+            else:
+                out.append(s.strip())
+    
+    # normalize empties
+    return [c for c in out if c]
 
-    # Fallback: parse raw "id: message"
-    for raw in (run_snapshot.get("errors") or []):
-        try:
-            _, msg = str(raw).split(":", 1)
-            errs.append(msg.strip())
-        except ValueError:
-            errs.append(str(raw).strip())
-    return errs
+def _family(code: str) -> str:
+    # family is the prefix before the first colon, e.g. "missing", "schema", "aspects"
+    i = code.find(":")
+    return code[:i+1] if i != -1 else code
 
-def _families(code: str) -> List[str]:
-    """
-    Break a code like 'schema:required:attributes/brand' into families:
-      - 'schema'
-      - 'schema:required'
-    For 'aspects:missing:Color' -> 'aspects', 'aspects:missing'
-    For 'missing:brand' -> 'missing'
-    """
-    parts = str(code).split(":")
-    fams: List[str] = []
-    if parts:
-        fams.append(parts[0])
+def _family_level1(code: str) -> str:
+    """Extract first prefix: 'missing:brand' -> 'missing'"""
+    i = code.find(":")
+    return code[:i] if i != -1 else code
+
+def _family_level2(code: str) -> str:
+    """Extract first two prefixes: 'schema:required:attributes/brand' -> 'schema:required'"""
+    parts = code.split(":")
     if len(parts) >= 2:
-        fams.append(":".join(parts[:2]))
-    return fams
+        return f"{parts[0]}:{parts[1]}"
+    return code
 
 # ---------- Route ----------
 
@@ -176,43 +187,52 @@ def review(
 @router.get("/summary")
 def review_summary(
     run_id: Optional[str] = Query(None, description="Run id to summarize; defaults to latest saved run"),
-    top: int = Query(50, ge=1, le=500, description="Max rows for each histogram"),
+    top: Optional[int] = Query(
+        None,
+        ge=1,
+        le=100,
+        description="Return only the top-N error families by count (1..100). Omit for all."
+    ),
 ):
     snap = load_run(run_id)
     if not snap:
-        raise HTTPException(status_code=404, detail="No saved runs found" if run_id is None else "Run not found")
+        raise HTTPException(status_code=404, detail="Run not found")
 
-    codes = _collect_error_strings(snap)
+    rejects: List[Dict[str, Any]] = snap.get("rejects", [])
+    raw_errors: List[str] = snap.get("errors", [])
+    
+    # 1) build exact codes and family buckets
+    exact_codes = _flatten_error_codes(rejects, raw_errors)
+    exact_hist = Counter(exact_codes)
+    
+    # Build hierarchical family histograms
+    fam1_hist = Counter(_family_level1(c) for c in exact_codes)
+    fam2_hist = Counter(_family_level2(c) for c in exact_codes)
 
-    # Exact code histogram
-    exact_ctr = Counter(codes)
-
-    # Family histograms
-    fam1_ctr: Counter[str] = Counter()
-    fam2_ctr: Counter[str] = Counter()
-    for c in codes:
-        fams = _families(c)
-        if len(fams) >= 1:
-            fam1_ctr[fams[0]] += 1
-        if len(fams) >= 2:
-            fam2_ctr[fams[1]] += 1
-
-    def _top(counter: Counter[str]) -> List[Dict[str, Any]]:
-        return [{"code": k, "count": v} for k, v in counter.most_common(top)]
+    
+    # 2) sort and limit
+    fam1_items = sorted(fam1_hist.items(), key=lambda kv: (-kv[1], kv[0]))
+    fam2_items = sorted(fam2_hist.items(), key=lambda kv: (-kv[1], kv[0]))
+    
+    if top is not None:
+        fam1_items = fam1_items[:top]
+        fam2_items = fam2_items[:top]
+    
+    exact_items = sorted(exact_hist.items(), key=lambda kv: (-kv[1], kv[0]))
 
     return {
         "run_id": snap.get("run_id"),
         "channel": snap.get("channel"),
         "catalog_path": snap.get("catalog_path"),
-        "catalog_sha256": (snap.get("catalog_fingerprint") or {}).get("sha256"),
+        "catalog_sha256": snap.get("catalog_fingerprint", {}).get("sha256"),
         "counts": {
-            "total_rejects": len(snap.get("rejects") or []),
-            "total_errors": sum(exact_ctr.values()),
-            "unique_error_codes": len(exact_ctr),
+            "total_rejects": len(rejects),
+            "total_errors": len(exact_codes),
+            "unique_error_codes": len(fam1_hist),  # families
         },
         "histograms": {
-            "exact": _top(exact_ctr),
-            "families_level1": _top(fam1_ctr),  # e.g., 'missing', 'schema', 'aspects'
-            "families_level2": _top(fam2_ctr),  # e.g., 'schema:required', 'aspects:missing'
+            "families_level1": [{"code": code, "count": count} for code, count in fam1_items],
+            "families_level2": [{"code": code, "count": count} for code, count in fam2_items],
+            "exact": [{"code": code, "count": count} for code, count in exact_items],
         },
     }
