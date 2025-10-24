@@ -112,6 +112,9 @@ python -m uvicorn src.app.main:app --reload
 | GET | `/health` | Basic health check (current router exposes `/health`). |
 | POST | `/translate/{channel}?dry_run=true\|false` | Run the pipeline for `amazon` or `ebay`. With `dry_run=true`, returns counts + preview. |
 | POST   | `/review/{channel}`                | Return rejects + error codes to drive a fix-up UI (filter/sort/paging supported). |
+| GET   | `/review/summary`                | Histogram of error codes (families + exact) for a run. Defaults to latest run; or pass run_id. |
+| GET   | `/runs`                | List saved runs (lightweight metadata). |
+| GET   | `/runs/{id}`                | Fetch a full saved run snapshot by run_id. |
 | POST | `/ebay/validate` | Validate a single eBay payload (title/brand/price + optional category aspects). |
 | POST | `/ebay/upsert/{sku}?mode=DRAFT\|LIVE` | Create/replace Inventory Item → Offer; publish when `mode=LIVE`. |
 | POST | `/amazon/validate` | Validate {productType, attributes} using PTD (client-side JSON Schema). |
