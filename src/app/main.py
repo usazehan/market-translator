@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from .routers import translate, health, metrics, review, ebay, amazon
+from .routers import translate, health, metrics, review, ebay, amazon, runs
 
 app = FastAPI(title="Marketplace Schema Translator + Rate-Limit Agent")
 
@@ -9,3 +9,4 @@ app.include_router(translate.router, prefix="", tags=["translate"])
 app.include_router(review.router, tags=["review"])
 app.include_router(ebay.router, tags=["ebay"])
 app.include_router(amazon.router, tags=["amazon"])
+app.include_router(runs.router, tags=["runs"])

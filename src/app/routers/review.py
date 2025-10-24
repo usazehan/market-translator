@@ -4,11 +4,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Query, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
+from collections import Counter
 
 from pipeline.graph import run_pipeline
 from storage.runs import load_run
 
-router = APIRouter(tags=["review"])
+router = APIRouter(prefix="/review")
 
 # ---------- Models ----------
 
@@ -25,6 +26,7 @@ class ReviewRequest(BaseModel):
 
 class ReviewResponse(BaseModel):
     channel: str
+    run_id: str 
     total_rejects: int
     total_filtered: int
     limit: int
@@ -57,9 +59,56 @@ def _match_code_prefix(rec: Dict[str, Any], code_pref: Optional[str]) -> bool:
     errs = rec.get("errors", []) or []
     return any(e.startswith(code_pref) for e in errs)
 
+def _flatten_error_codes(rejects: List[Dict[str, Any]], raw_errors: List[str]) -> List[str]:
+    """
+    Build a flat list of error codes from snapshot:
+    - Prefer structured rejects[i]["errors"] (list of strings)
+    """
+    out: List[str] = []
+    
+    # Process structured rejects first
+    for r in rejects or []:
+        for e in r.get("errors") or []:
+            if e and isinstance(e, str):
+                out.append(e.strip())
+    
+    # Only use raw_errors as fallback if we got nothing from rejects
+    if not out:
+        for s in raw_errors or []:
+            if not s:
+                continue
+            # Parse "ID: error_code" format
+            if ":" in s:
+                parts = s.split(":", 1)
+                # If first part looks like an ID (no colons), strip it
+                if ":" not in parts[0]:
+                    out.append(parts[1].strip())
+                else:
+                    out.append(s.strip())
+            else:
+                out.append(s.strip())
+    
+    return [c for c in out if c]
+
+def _family_level1(code: str) -> str:
+    """Extract first prefix: 'missing:brand' -> 'missing'"""
+    if not code:
+        return ""
+    i = code.find(":")
+    return code[:i] if i != -1 else code
+
+def _family_level2(code: str) -> str:
+    """Extract first two prefixes: 'schema:required:brand' -> 'schema:required'"""
+    if not code:
+        return ""
+    parts = code.split(":", 2)  # Only split up to 2 levels
+    if len(parts) >= 2:
+        return f"{parts[0]}:{parts[1]}"
+    return code
+
 # ---------- Route ----------
 
-@router.post("/review/{channel}", response_model=ReviewResponse)
+@router.post("/{channel}", response_model=ReviewResponse)
 def review(
     channel: str,
     req: ReviewRequest,
@@ -132,3 +181,64 @@ def review(
         offset=offset,
         items=items,
     )
+    
+@router.get("/summary")
+def review_summary(
+    run_id: Optional[str] = Query(None, description="Run id to summarize; defaults to latest saved run"),
+    top: Optional[int] = Query(
+        None,
+        ge=1,
+        le=100,
+        description="Return only the top-N error families by count (1..100). Omit for all."
+    ),
+):
+    """
+    Get error histogram summaries for a run with hierarchical family groupings.
+    """
+    snap = load_run(run_id)
+    if not snap:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Run not found: {run_id}" if run_id else "No runs available"
+        )
+
+    rejects: List[Dict[str, Any]] = snap.get("rejects", [])
+    raw_errors: List[str] = snap.get("errors", [])
+    
+    # build exact codes and family buckets
+    exact_codes = _flatten_error_codes(rejects, raw_errors)
+    exact_hist = Counter()
+    fam1_hist = Counter()
+    fam2_hist = Counter()
+
+    for code in exact_codes:
+        exact_hist[code] += 1
+        fam1_hist[_family_level1(code)] += 1
+        fam2_hist[_family_level2(code)] += 1
+    
+    # 2) sort and limit
+    fam1_items = sorted(fam1_hist.items(), key=lambda kv: (-kv[1], kv[0]))
+    fam2_items = sorted(fam2_hist.items(), key=lambda kv: (-kv[1], kv[0]))
+    exact_items = sorted(exact_hist.items(), key=lambda kv: (-kv[1], kv[0]))
+    
+    if top is not None:
+        fam1_items = fam1_items[:top]
+        fam2_items = fam2_items[:top]
+    
+    return {
+        "run_id": snap.get("run_id"),
+        "channel": snap.get("channel"),
+        "catalog_path": snap.get("catalog_path"),
+        "catalog_sha256": snap.get("catalog_fingerprint", {}).get("sha256"),
+        "counts": {
+            "total_rejects": len(rejects),
+            "total_errors": len(exact_codes),
+            "unique_error_codes": len(fam1_hist),
+            "returned_histogram_bins": len(fam1_items),
+        },
+        "histograms": {
+            "families_level1": [{"code": code, "count": count} for code, count in fam1_items],
+            "families_level2": [{"code": code, "count": count} for code, count in fam2_items],
+            "exact": [{"code": code, "count": count} for code, count in exact_items],
+        },
+    }
